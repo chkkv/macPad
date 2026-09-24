@@ -35,8 +35,7 @@ jobs:
       # The project targets the rootless iOS 16.5 Theos SDK. That SDK ships
       # without usr/include/xpc/ (see vendor/ios-xpc/README.md); Xcode 15+
       # SDKs do ship it, which makes the hand-written xpc_data_create
-      # declaration in MTLCompilerBypassOSCheck/Tweak.x conflict. Vendoring the
-      # exact SDK keeps the build reproducible.
+      # declaration in MTLCompilerBypassOSCheck/Tweak.x conflict.
       IOS_SDK_VERSION: "16.5"
 
     steps:
@@ -67,8 +66,17 @@ jobs:
           cp -R "/tmp/theos-sdks/iPhoneOS${IOS_SDK_VERSION}.sdk" "$THEOS/sdks/"
           ls "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk"
 
-      - name: Provide the macOS SDK to Theos
+      - name: Provide SDKs to Theos
         run: |
+          # Theos's TARGET "latest" SDK selector scans both $THEOS/sdks and the
+          # Xcode SDK dir, and the TARGET field takes precedence over the
+          # SDKVERSION variable (makefiles/targets/_common/darwin_head.mk). Hide
+          # the Xcode iPhoneOS SDK so the vendored iOS 16.5 SDK is the newest
+          # one Theos can see.
+          XCODE_DEV="$(xcode-select -p)"
+          for d in "$XCODE_DEV"/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk; do
+            if [ -e "$d" ]; then sudo mv "$d" /tmp/; echo "hid $d"; fi
+          done
           MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
           MAC_VER="$(xcrun --sdk macosx --show-sdk-version)"
           ln -sfn "$MAC_SDK" "$THEOS/sdks/MacOSX${MAC_VER}.sdk"
@@ -76,10 +84,7 @@ jobs:
 
       - name: Build and package
         run: |
-          # SDKVERSION pins the vendored iOS 16.5 SDK. Without it Theos's
-          # "latest" picks the newer Xcode iPhoneOS SDK, which reintroduces the
-          # xpc_data_create conflict.
-          gmake FINALPACKAGE=1 STRIP=0 OPTFLAG=-O2 SDKVERSION="${IOS_SDK_VERSION}" \
+          gmake FINALPACKAGE=1 STRIP=0 OPTFLAG=-O2 \
             THEOS_PACKAGE_SCHEME=rootless GO_EASY_ON_ME=1 \
             package
 
