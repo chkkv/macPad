@@ -32,26 +32,22 @@ jobs:
 
     env:
       THEOS: ${{ github.workspace }}/theos
+      # The project targets the rootless iOS 16.5 Theos SDK. That SDK ships
+      # without usr/include/xpc/ (see vendor/ios-xpc/README.md); Xcode 15+
+      # SDKs do ship it, which makes the hand-written xpc_data_create
+      # declaration in MTLCompilerBypassOSCheck/Tweak.x conflict. Vendoring the
+      # exact SDK keeps the build reproducible.
+      IOS_SDK_VERSION: "16.5"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Select an Xcode that ships the iPhoneOS SDK
-        run: |
-          if ! xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1; then
-            XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
-            sudo xcode-select -switch "$XCODE/Contents/Developer"
-          fi
-          echo "iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
-          echo "macOS SDK:    $(xcrun --sdk macosx --show-sdk-version)"
 
       - name: Install build dependencies
         run: |
           brew install make ldid dpkg xz
           echo "$(brew --prefix)/opt/make/libexec/gnubin" >> "$GITHUB_PATH"
           gmake --version | head -1
-          ldid --version 2>&1 | head -1 || true
           dpkg-deb --version | head -1
 
       - name: Install Theos
@@ -62,12 +58,17 @@ jobs:
           ln -sf "$(brew --prefix)/bin/ldid" "$THEOS/bin/ldid"
           ln -sf "$(brew --prefix)/bin/dpkg-deb" "$THEOS/bin/dpkg-deb"
 
-      - name: Provide iOS + macOS SDKs to Theos
+      - name: Install iOS ${{ env.IOS_SDK_VERSION }} SDK
         run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/theos/sdks.git /tmp/theos-sdks
+          git -C /tmp/theos-sdks sparse-checkout set "iPhoneOS${IOS_SDK_VERSION}.sdk"
           mkdir -p "$THEOS/sdks"
-          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
-          IOS_VER="$(xcrun --sdk iphoneos --show-sdk-version)"
-          ln -sfn "$IOS_SDK" "$THEOS/sdks/iPhoneOS${IOS_VER}.sdk"
+          cp -R "/tmp/theos-sdks/iPhoneOS${IOS_SDK_VERSION}.sdk" "$THEOS/sdks/"
+          ls "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk"
+
+      - name: Provide the macOS SDK to Theos
+        run: |
           MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
           MAC_VER="$(xcrun --sdk macosx --show-sdk-version)"
           ln -sfn "$MAC_SDK" "$THEOS/sdks/MacOSX${MAC_VER}.sdk"
