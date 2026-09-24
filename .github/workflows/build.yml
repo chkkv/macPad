@@ -66,21 +66,24 @@ jobs:
           cp -R "/tmp/theos-sdks/iPhoneOS${IOS_SDK_VERSION}.sdk" "$THEOS/sdks/"
           ls "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk"
 
-      - name: Provide SDKs to Theos
+      - name: Provide the macOS SDK to Theos
         run: |
-          # Theos's TARGET "latest" SDK selector scans both $THEOS/sdks and the
-          # Xcode SDK dir, and the TARGET field takes precedence over the
-          # SDKVERSION variable (makefiles/targets/_common/darwin_head.mk).
-          # Remove every Xcode iPhoneOS SDK (iPhoneOS.sdk is a symlink, so the
-          # real iPhoneOS<ver>.sdk must go too), then point xcrun at the
-          # vendored iOS 16.5 SDK so it stays the newest one Theos can see.
-          XCODE_SDKS="$(xcode-select -p)/Platforms/iPhoneOS.platform/Developer/SDKs"
-          sudo find "$XCODE_SDKS" -maxdepth 1 -name 'iPhoneOS*.sdk' -exec rm -rf {} +
-          sudo ln -sfn "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk" "$XCODE_SDKS/iPhoneOS.sdk"
           MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
           MAC_VER="$(xcrun --sdk macosx --show-sdk-version)"
           ln -sfn "$MAC_SDK" "$THEOS/sdks/MacOSX${MAC_VER}.sdk"
           ls -l "$THEOS/sdks"
+
+      - name: Pin the iOS SDK to ${{ env.IOS_SDK_VERSION }}
+        run: |
+          # Theos's TARGET "latest" selector resolves to the newest SDK on the
+          # build host and takes precedence over the SDKVERSION variable
+          # (makefiles/targets/_common/darwin_head.mk). Pin the version in
+          # every iPhone Makefile in the working tree; the macosx targets keep
+          # their own "latest" selection.
+          grep -rl 'iphone:clang:latest:' --include=Makefile . \
+            | xargs sed -i '' "s/iphone:clang:latest:/iphone:clang:${IOS_SDK_VERSION}:/g"
+          echo "pinned Makefiles:"
+          grep -rln "iphone:clang:${IOS_SDK_VERSION}:" --include=Makefile . | wc -l
 
       - name: Build and package
         run: |
