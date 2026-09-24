@@ -70,13 +70,13 @@ jobs:
         run: |
           # Theos's TARGET "latest" SDK selector scans both $THEOS/sdks and the
           # Xcode SDK dir, and the TARGET field takes precedence over the
-          # SDKVERSION variable (makefiles/targets/_common/darwin_head.mk). Hide
-          # the Xcode iPhoneOS SDK so the vendored iOS 16.5 SDK is the newest
-          # one Theos can see.
-          XCODE_DEV="$(xcode-select -p)"
-          for d in "$XCODE_DEV"/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk; do
-            if [ -e "$d" ]; then sudo mv "$d" /tmp/; echo "hid $d"; fi
-          done
+          # SDKVERSION variable (makefiles/targets/_common/darwin_head.mk).
+          # Remove every Xcode iPhoneOS SDK (iPhoneOS.sdk is a symlink, so the
+          # real iPhoneOS<ver>.sdk must go too), then point xcrun at the
+          # vendored iOS 16.5 SDK so it stays the newest one Theos can see.
+          XCODE_SDKS="$(xcode-select -p)/Platforms/iPhoneOS.platform/Developer/SDKs"
+          sudo find "$XCODE_SDKS" -maxdepth 1 -name 'iPhoneOS*.sdk' -exec rm -rf {} +
+          sudo ln -sfn "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk" "$XCODE_SDKS/iPhoneOS.sdk"
           MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
           MAC_VER="$(xcrun --sdk macosx --show-sdk-version)"
           ln -sfn "$MAC_SDK" "$THEOS/sdks/MacOSX${MAC_VER}.sdk"
