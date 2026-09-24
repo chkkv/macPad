@@ -76,7 +76,10 @@ jobs:
 
       - name: Build and package
         run: |
-          gmake FINALPACKAGE=1 STRIP=0 OPTFLAG=-O2 \
+          # SDKVERSION pins the vendored iOS 16.5 SDK. Without it Theos's
+          # "latest" picks the newer Xcode iPhoneOS SDK, which reintroduces the
+          # xpc_data_create conflict.
+          gmake FINALPACKAGE=1 STRIP=0 OPTFLAG=-O2 SDKVERSION="${IOS_SDK_VERSION}" \
             THEOS_PACKAGE_SCHEME=rootless GO_EASY_ON_ME=1 \
             package
 
