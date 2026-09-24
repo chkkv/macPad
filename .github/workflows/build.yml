@@ -1,0 +1,87 @@
+name: Build
+
+# Builds the Theos package (.deb) on a GitHub-hosted Apple-silicon macOS
+# runner, mirroring the macOS cross-compile path in misc/build.sh:
+#
+#   gmake FINALPACKAGE=1 STRIP=0 OPTFLAG=-O2 \
+#         THEOS_PACKAGE_SCHEME=rootless GO_EASY_ON_ME=1 package
+#
+# The device-side steps (dpkg -i, set_macos_version.py, ldid re-signing,
+# trustcache, rootfs sync) are intentionally NOT performed here: they require
+# a jailbroken iPad. This workflow only produces the installable artifact.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Theos package (arm64 macOS)
+    runs-on: macos-14
+    timeout-minutes: 120
+
+    env:
+      THEOS: ${{ github.workspace }}/theos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select an Xcode that ships the iPhoneOS SDK
+        run: |
+          if ! xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1; then
+            XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
+            sudo xcode-select -switch "$XCODE/Contents/Developer"
+          fi
+          echo "iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "macOS SDK:    $(xcrun --sdk macosx --show-sdk-version)"
+
+      - name: Install build dependencies
+        run: |
+          brew install make ldid dpkg xz
+          echo "$(brew --prefix)/opt/make/libexec/gnubin" >> "$GITHUB_PATH"
+          gmake --version | head -1
+          ldid --version 2>&1 | head -1 || true
+          dpkg-deb --version | head -1
+
+      - name: Install Theos
+        run: |
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          mkdir -p "$THEOS/bin"
+          # Theos resolves LDID/DPKG_DEB from $THEOS/bin first.
+          ln -sf "$(brew --prefix)/bin/ldid" "$THEOS/bin/ldid"
+          ln -sf "$(brew --prefix)/bin/dpkg-deb" "$THEOS/bin/dpkg-deb"
+
+      - name: Provide iOS + macOS SDKs to Theos
+        run: |
+          mkdir -p "$THEOS/sdks"
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          IOS_VER="$(xcrun --sdk iphoneos --show-sdk-version)"
+          ln -sfn "$IOS_SDK" "$THEOS/sdks/iPhoneOS${IOS_VER}.sdk"
+          MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          MAC_VER="$(xcrun --sdk macosx --show-sdk-version)"
+          ln -sfn "$MAC_SDK" "$THEOS/sdks/MacOSX${MAC_VER}.sdk"
+          ls -l "$THEOS/sdks"
+
+      - name: Build and package
+        run: |
+          gmake FINALPACKAGE=1 STRIP=0 OPTFLAG=-O2 \
+            THEOS_PACKAGE_SCHEME=rootless GO_EASY_ON_ME=1 \
+            package
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: macpad-deb
+          path: packages/*.deb
+          if-no-files-found: error
